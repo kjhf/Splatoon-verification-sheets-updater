@@ -5,7 +5,9 @@
  * @returns {Object[]} The values.
  */
 function cacheAllValues(sheet) {
-  return CACHE = sheet.getSheetValues(1, 1, sheet.getMaxRows(), COLUMNS_TOTAL);
+  CACHE = sheet.getSheetValues(1, 1, sheet.getMaxRows(), COLUMNS_TOTAL);
+  debug(`sheet cached with length: ${CACHE.length} x ${COLUMNS_TOTAL}`);
+  return CACHE;
 }
 
 /**
@@ -27,7 +29,7 @@ function cacheAllValues(sheet) {
 }
 
 /**
- * Get the specified row values from the cache.
+ * Get the specified column values from the cache.
  * @param {SpreadsheetApp.Sheet} sheet The sheet (to retrieve the rows)
  * @param {number|SpreadsheetApp.Range} column The column to retrieve the value from (as a range or 1-based number).
  * @returns The value[] from the specified column from the cache.
@@ -97,11 +99,17 @@ function setValueInCache(row, column, value) {
     throw new TypeError(`Column must be a number, actually ${typeof column} (${column}).`);
   }
 
-  if (row < 1 || row > CACHE.length) {
-    throw new Error(`Row ${row} is out of bounds`);
+  if (row < 1) {
+    throw new Error(`Row ${row} is out of bounds (1-based!)`);
+  }
+  if (row > CACHE.length) {
+    throw new Error(`Row ${row} is out of bounds, call createGetLastRow to stay in sync`);
+  }
+  if (column < 1) {
+    throw new Error(`Column ${column} is out of bounds (1-based!)`);
   }
   if (column > COLUMNS_TOTAL) {
-    throw new Error(`Column ${column} is out of bounds`);
+    throw new Error(`Column ${column} is out of bounds (>${COLUMNS_TOTAL})`);
   }
 
   try {
@@ -124,9 +132,26 @@ function setValueInCache(row, column, value) {
 }
 
 /**
+ * Add one row to the cache.
+ */
+function appendCacheRow() {
+  CACHE.push(Array(COLUMNS_TOTAL).fill(""));
+}
+
+/**
+ * Insert a column to the cache.
+ */
+function insertColumn(columnIndex, defaultValue = "") {
+  for (let i = 0; i < CACHE.length; i++) {
+    CACHE[i].splice(columnIndex, 0, defaultValue);
+  }
+}
+
+/**
  * Commit the cache to the sheet.
  * @param {SpreadsheetApp.Sheet} sheet The sheet to commit to.
  */
 function commitCache(sheet) {
+  debug(`committing the cache...`);
   sheet.getRange(1, 1, CACHE.length, COLUMNS_TOTAL).setValues(CACHE);
 }

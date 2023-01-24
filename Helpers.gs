@@ -24,7 +24,7 @@ function getSheetById(id) {
 }
 
 function showSidebarFeedback(message) {
-   var html = HtmlService.createHtmlOutput()
+   let html = HtmlService.createHtmlOutput()
       .setTitle('Slate says...')
       .setFaviconUrl('https://media.discordapp.net/attachments/471361750986522647/758104388824072253/icon.png')
       .append(message)
@@ -48,7 +48,23 @@ function parseIntOrThrow(string, radix = null) {
   return num;
 }
 
-/* Build a URL query options string like URLSearchParams (unavailable in GScript). Does not have a leading ?. */
+/**
+ * Get if the specified URL exists
+ * @param {String} url 
+ * @returns {Boolean}
+ */
+function urlPageExists(url) {
+  const params = {"method" : "GET", "headers": {"X-HTTP-Method-Override": "HEAD"}};
+  let response = UrlFetchApp.fetch(url, params);
+  let code = response.getResponseCode();
+  debug(`Response code: ${code} from ${url}`);
+  return code >= 200 && code <= 399;
+}
+
+/** 
+ * Build a URL query options string like URLSearchParams (unavailable in GScript).
+ * Does not have a leading ?.
+ */
 function urlQueryBuilder(obj) {
   return Object.keys(obj).reduce(function(p, e, i) {
     return p + (i == 0 ? "" : "&") +

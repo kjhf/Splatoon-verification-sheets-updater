@@ -2,7 +2,7 @@
 // Above declaration makes Javascript less jank
 // See https://www.w3schools.com/js/js_strict.asp
 
-const BATTLEFY_ID_REGEX = new RegExp("[A-Fa-f0-9]{20,30}","g");
+const BATTLEFY_ID_REGEX = new RegExp("[A-Fa-f0-9]{20,30}");
 const NUMBER_OF_PLAYERS = 8
 
 const SEEDING_COLUMN = 1
@@ -12,7 +12,8 @@ const PLAYER_NAMES_COLUMNS = Array.from({length: NUMBER_OF_PLAYERS}, (_, i) => i
 const DROPPED_PLAYER_NAMES_INDEX = (PLAYER_NAMES_INDEX + NUMBER_OF_PLAYERS)
 const DROPPED_PLAYER_NAMES_COLUMNS = Array.from({length: NUMBER_OF_PLAYERS}, (_, i) => i + DROPPED_PLAYER_NAMES_INDEX)
 const NOTES_COLUMN = DROPPED_PLAYER_NAMES_INDEX + NUMBER_OF_PLAYERS
-const GAP_COLUMN = (NOTES_COLUMN + 1)
+const TEAM_LOGO_URL_COLUMN = (NOTES_COLUMN + 1)
+const GAP_COLUMN = (TEAM_LOGO_URL_COLUMN + 1)
 const TEAM_ID_COLUMN = (GAP_COLUMN + 1)
 const PLAYER_IDS_INDEX = (TEAM_ID_COLUMN + 1)
 const PLAYER_IDS_COLUMNS = Array.from({length: NUMBER_OF_PLAYERS}, (_, i) => i + PLAYER_IDS_INDEX)
@@ -23,8 +24,13 @@ const DROPPED_PLAYER_IDS_COLUMNS = Array.from({length: NUMBER_OF_PLAYERS}, (_, i
 const DROPPED_PLAYER_SLUGS_INDEX = (DROPPED_PLAYER_IDS_INDEX + NUMBER_OF_PLAYERS)
 const DROPPED_PLAYER_SLUGS_COLUMNS = Array.from({length: NUMBER_OF_PLAYERS}, (_, i) => i + DROPPED_PLAYER_SLUGS_INDEX)
 const UPDATE_TIME_COLUMN = DROPPED_PLAYER_SLUGS_INDEX + NUMBER_OF_PLAYERS
-const GUTTER_TOURNAMENT_ID_COLUMN = UPDATE_TIME_COLUMN + 1
-const COLUMNS_TOTAL = GUTTER_TOURNAMENT_ID_COLUMN + 1
+const GUTTER_TOURNAMENT_ID_COLUMN = UPDATE_TIME_COLUMN; // version 1
+const SHEET_INFO_COLUMN = UPDATE_TIME_COLUMN + 2  // Leave a space
+const SHEET_INFO_COLUMN_HEADER_ROW = 1
+const SHEET_INFO_COLUMN_TOURNAMENT_ID_ROW = 2
+const SHEET_INFO_COLUMN_VERSION_ROW = 3
+const SHEET_INFO_ROWS = SHEET_INFO_COLUMN_VERSION_ROW
+const COLUMNS_TOTAL = SHEET_INFO_COLUMN + 1
 const HEADER_VALUES = initHeaderValues();
 var CACHE = [];
 
@@ -41,6 +47,8 @@ function initHeaderValues() {
   result[0][TEAM_NAME_COLUMN - 1] = "Team Name";
   result[0][TEAM_ID_COLUMN - 1] = "Team Id";
   result[0][NOTES_COLUMN - 1] = "Notes";
+  result[0][TEAM_LOGO_URL_COLUMN - 1] = "Logo URL";
+  result[0][SHEET_INFO_COLUMN - 1] = "Sheet Info";
   
   for (let i = 0; i < NUMBER_OF_PLAYERS; i++) {
     result[0][PLAYER_NAMES_COLUMNS[i] - 1] = `P${(i + 1)}`;
@@ -54,8 +62,8 @@ function initHeaderValues() {
 }
 
 function createBattlefySheet() {
-  let ui = SpreadsheetApp.getUi();
-  let response = ui.prompt('Please enter the Battlefy Tournament Id or its tournament link!', 
+  const ui = SpreadsheetApp.getUi();
+  const response = ui.prompt('Please enter the Battlefy Tournament Id or its tournament link!', 
     'It will look something like \"622bbfd72282c9043b22e5f9\" or \"https://battlefy.com/mulloway-institute-of-turfing/minnow-cup-12-splat-zones-edition/622bbfd72282c9043b22e5f9/\"', ui.ButtonSet.OK);
 
   // Process the user's response.
@@ -77,29 +85,10 @@ function createBattlefySheet() {
       return;
     }
     
-    let battlefyUrl = getBattlefyUrl(input);
+    const battlefyUrl = getBattlefyUrl(input);
     if (urlPageExists(battlefyUrl)) {
-      let sheet = createSheet(input);
-      
-      // Add the columns
-      var headerRow = sheet.getRange(1, 1, 1, COLUMNS_TOTAL);
-      headerRow.setFontWeight('bold');
-      headerRow.setHorizontalAlignment('center');
-      headerRow.setVerticalAlignment('middle');
-      //headerRow.setFontSize(12);
-      //sheet.setRowHeight(1, 34);
-      //sheet.setColumnWidths(1, 6, 208);
-      HEADER_VALUES[0][GUTTER_TOURNAMENT_ID_COLUMN - 1] = input;  // -1 because [] indexes
-      headerRow = headerRow.setValues(HEADER_VALUES);
-      
-      // Delete rows after the last row
-      var maxRows = sheet.getMaxRows(); 
-      var lastRow = sheet.getLastRow();
-      if (maxRows - lastRow != 0) {
-        sheet.deleteRows(lastRow + 1, maxRows - lastRow);
-      }
-
-      debug(`Sheet created! ${input}`);
+      const sheet = createSheet(input);
+      initialiseBattlefySheet(sheet, input);
       doUpdateSheet(sheet);
       return sheet;
     } else {
@@ -111,16 +100,28 @@ function createBattlefySheet() {
 }
 
 /**
- * Create a sheet with the specified name in the workbook and return it.
- * @param {String} name Optional name of the Workbook, or leave blank to title it as the current date. 
- * @returns {SpreadsheetApp.Sheet} The created sheet. 
+ * Set the header row and sheet info with the current version
+ * @param {SpreadsheetApp.Sheet} sheet 
+ * @param {String} battlefyId 
  */
-function createSheet(name = null) {
-  if (name === null) {
-    name = (new Date()).toLocaleDateString();
-  }
-  let sheet = SpreadsheetApp.getActiveSpreadsheet().insertSheet(name);
-  return sheet;
+function initialiseBattlefySheet(sheet, battlefyId) {
+  setHeaderRow(sheet, HEADER_VALUES);
+  trimSheetRows(sheet);
+  cacheAllValues(sheet);
+  setSheetInfo(sheet, battlefyId);
+  debug(`Sheet initialised (version ${VERSION})! Id: ${battlefyId}`);
+  commitCache(sheet);
+}
+
+/**
+ * Set the sheet info with the current version
+ * @param {SpreadsheetApp.Sheet} sheet 
+ * @param {String} battlefyId 
+ */
+function setSheetInfo(sheet, battlefyId) {
+  ensureSheetInfoRows(sheet);
+  setValueInCache(SHEET_INFO_COLUMN_TOURNAMENT_ID_ROW, SHEET_INFO_COLUMN, battlefyId);
+  setValueInCache(SHEET_INFO_COLUMN_VERSION_ROW, SHEET_INFO_COLUMN, VERSION);
 }
 
 /**
@@ -129,15 +130,35 @@ function createSheet(name = null) {
  * @returns {String?} The id, or null if not found.
  */
 function getTournamentIdFromSheet(sheet) {
+  const sheetName = sheet.getName();
+  debug(`${sheetName}: Running getTournamentIdFromSheet`);
+  if (isBattlefyId(sheetName)) {
+    debug(`${sheetName}: Returning battlefy id from sheet name`);
+    return sheetName;
+  }
+
   try {
-    return sheet.getRange(1, GUTTER_TOURNAMENT_ID_COLUMN, 1, 1).getValue().toString();
+    const version = getVersion(sheet);
+    if (version == 1) {
+      const version1Val = getValueFromCache(1, GUTTER_TOURNAMENT_ID_COLUMN);
+      if (isBattlefyId(version1Val)) {
+        debug(`Returning battlefy id from version 1 sheet: ${version1Val}`)
+        return version1Val;
+      } else {
+        debug(`${sheetName}: Sheet is version 1 but has an invalid battlefy id? Falling back to getting from sheet info. ${version1Val}`)
+      }
+    }
+    const val = getValueFromCache(SHEET_INFO_COLUMN_TOURNAMENT_ID_ROW, SHEET_INFO_COLUMN);
+    if (val !== "") {
+      debug(`${sheetName}: Returning battlefy id from sheet value: ${val}`);
+      return val;
+    }
+    else {
+      debug(`${sheetName}: No battlefy id in sheet info.`)
+      return null;
+    }
   }
   catch (e) {
-    // Attempt fallback to sheetname.
-    let sheetName = sheet.getName();
-    if (isBattlefyId(sheetName)) {
-      return sheetName;
-    }
     // Nope.
     return null;
   }
@@ -147,7 +168,7 @@ function getTournamentIdFromSheet(sheet) {
  * Update a Battlefy sheet determined from the UI.
  */
 function beginUpdateBattlefySheet() {
-  let battlefySheets = getBattlefySheets();
+  const battlefySheets = getBattlefySheets();
   switch (battlefySheets.length)
   {
     case 0:
@@ -163,13 +184,14 @@ function beginUpdateBattlefySheet() {
     }
     default:
     {
-      let sheet = SpreadsheetApp.getActiveSheet();
-      tournament_id = getTournamentIdFromSheet(sheet);
+      debug(`2+ battlefySheets...`);
+      const sheet = SpreadsheetApp.getActiveSheet();
+      const tournamentId = getTournamentIdFromSheet(sheet);
       
-      if (isBattlefyId(tournament_id))
+      if (isBattlefyId(tournamentId))
       {
-        let ui = SpreadsheetApp.getUi();
-        let response = ui.prompt(sheet.getName(), `Update the current page? (Tournament: ${tournament_id})`, ui.ButtonSet.YES_NO);
+        const ui = SpreadsheetApp.getUi();
+        const response = ui.prompt(sheet.getName(), `Update the current page? (Tournament: ${tournamentId})`, ui.ButtonSet.YES_NO);
 
         // Process the user's response.
         if (response.getSelectedButton() == ui.Button.YES) {
@@ -178,6 +200,7 @@ function beginUpdateBattlefySheet() {
       } else {
         showSidebarFeedback(`The active sheet is not a Battlefy page. Please first select the page you want to update.`);
       }
+      break;
     }
   }
 }
@@ -209,15 +232,17 @@ function doUpdateSheet(sheet) {
   // Strikethrough the whole row, add DROPPED to the seeding column
 
   // First check the tournament URL and its data to make sure it's valid
-  let tournament_id = getTournamentIdFromSheet(sheet);
-  if (!tournament_id) {
+  debug(`Calling upgradeBattlefySheet for ${sheet.getName()}`);
+  upgradeBattlefySheet(sheet);
+  const tournamentId = getTournamentIdFromSheet(sheet);
+  if (!tournamentId) {
     showSidebarFeedback(`The sheet is not a valid Battlefy sheet: ${sheet.getName()}`);
     return;
   }
   
-  let battlefyUrl = getBattlefyUrl(tournament_id);
-  let response = UrlFetchApp.fetch(battlefyUrl);
-  let responseText = response.getContentText();
+  const battlefyUrl = getBattlefyUrl(tournamentId);
+  const response = UrlFetchApp.fetch(battlefyUrl);
+  const responseText = response.getContentText();
   
   debug(`responseText length: ${responseText.length}`);
   if (responseText.length == 0) {
@@ -225,8 +250,8 @@ function doUpdateSheet(sheet) {
     return;
   }
 
-  let jsonData = JSON.parse(responseText);
-  let incomingTeamsJSON = jsonData;
+  const jsonData = JSON.parse(responseText);
+  const incomingTeamsJSON = jsonData;
   debug(`incomingTeamsJSON length: ${incomingTeamsJSON.length}`);
   if (incomingTeamsJSON.length == 0) {
     showSidebarFeedback("No incoming JSON data was parsed from the Bfy server.");
@@ -236,7 +261,6 @@ function doUpdateSheet(sheet) {
   // Cache the sheet (sets the CACHE var).
   // This is necessary because the Google API get and set requests are rate limited and so operations are really slow if you don't cache the sheet.
   cacheAllValues(sheet);
-  debug(`sheet cached with length: ${CACHE.length} x ${COLUMNS_TOTAL}`);
   let knownTeamIds = getValuesFromCacheColumn(sheet, TEAM_ID_COLUMN);
   
   let teamIds = new Map();  // Keyed by team id, value is the row number
@@ -274,7 +298,6 @@ function doUpdateSheet(sheet) {
     }
   }
   
-  debug(`committing the cache...`);
   commitCache(sheet);
   debug(`Done!`);
 }
@@ -313,6 +336,18 @@ function doUpdateSheetForKnownTeam(sheet, row, teamJson) {
     hasChanges = true;
     setValueInCache(row, TEAM_NAME_COLUMN, teamName);
     debug(`Team name has changed: Now ${teamName}`);
+  }
+
+  try {
+    let logoUrl = teamJson.persistentTeam.logoUrl;
+    if (getValueFromCache(row, TEAM_LOGO_URL_COLUMN) != logoUrl) {
+      hasChanges = true;
+      setValueInCache(row, TEAM_LOGO_URL_COLUMN, logoUrl);
+      debug(`Team logo has changed: Now ${logoUrl}`);
+    }
+  }
+  catch (e) {
+    debug(`No logo url field for team ${teamName} (${teamJson.persistentTeamID}).`)
   }
 
   let players = teamJson.players;
@@ -417,6 +452,14 @@ function doUpdateSheetForNewTeam(sheet, teamJson) {
   setValueInCache(row, UPDATE_TIME_COLUMN, getDateNow());
   setValueInCache(row, TEAM_NAME_COLUMN, teamName);
   setValueInCache(row, TEAM_ID_COLUMN, teamJson.persistentTeamID);
+  
+  try {
+    let logoUrl = teamJson.persistentTeam.logoUrl;
+    setValueInCache(row, TEAM_LOGO_URL_COLUMN, logoUrl);
+  }
+  catch (e) {
+    debug(`No logo url field for team ${teamName} (${teamJson.persistentTeamID}).`)
+  }
   let players = teamJson.players;
   if (players) {
     for (let i = 0; i < players.length && i < NUMBER_OF_PLAYERS; i++) {
@@ -535,25 +578,15 @@ function getFreePlayerSlot(row) {
 }
 
 /**
- * Get if the specified URL exists
- * @param {String} url 
- * @returns {Boolean}
- */
-function urlPageExists(url) {
-  const params = {"method" : "GET", "headers": {"X-HTTP-Method-Override": "HEAD"}};
-  let response = UrlFetchApp.fetch(url, params);
-  let code = response.getResponseCode();
-  debug(`Response code: ${code} from ${url}`);
-  return code >= 200 && code <= 399;
-}
-
-/**
  * Get if the string is a battlefy id by its length and format
- * @param {String} input 
+ * @param {String} inputId 
  * @returns {Boolean}
  */
-function isBattlefyId(input) {
-  return input && 20 <= input.length && input.length < 30 && BATTLEFY_ID_REGEX.test(input)
+function isBattlefyId(inputId) {
+  debug(`isBattlefyId(${inputId})`); 
+  debug(`inputId !== null && inputId !== "" && 20 <= inputId.length && inputId.length < 30 => ${inputId !== null && inputId !== "" && 20 <= inputId.length && inputId.length < 30}`);
+  debug(`BATTLEFY_ID_REGEX.test(inputId) => ${BATTLEFY_ID_REGEX.test(inputId)}`);
+  return inputId !== null && inputId !== "" && 20 <= inputId.length && inputId.length < 30 && BATTLEFY_ID_REGEX.test(inputId);
 }
 
 /**
@@ -570,13 +603,19 @@ function getBattlefyUrl(id) {
  * @returns {SpreadsheetApp.Sheet[]}
  */
 function getBattlefySheets() {
-  let sheets = SpreadsheetApp.getActiveSpreadsheet().getSheets();
   let battlefySheets = [];
-  for (let i = 0; i < sheets.length; i++) {
-    let candidate = sheets[i];
+  let candidateSheets = SpreadsheetApp.getActiveSpreadsheet().getSheets();
+  debug(`Iterating ${candidateSheets.length} candidateSheets`);
+  for (let sheetIndex = 0; sheetIndex < candidateSheets.length; sheetIndex++) {
+    let candidate = candidateSheets[sheetIndex];
+    debug(`candidate=${candidate.getName()}`);
+    if (candidate == null) continue;
+    
     let candidateId = getTournamentIdFromSheet(candidate);
-    if (isBattlefyId(candidateId))
+    debug(`candidateId=${candidateId}`)
+    if (candidateId !== null)
     {
+      debug(`Pushing candidateId to battlefySheets`)
       battlefySheets.push(candidate);
     }
   }
@@ -590,10 +629,37 @@ function getBattlefySheets() {
  */
 function createGetLastRow(sheet) {
   let rowIndex = CACHE.length;
-  sheet.insertRowAfter(rowIndex);
-  CACHE.push(Array(COLUMNS_TOTAL).fill(""));
+
+  // Special case first rows that contain sheet info
+  let appendNeeded = true;
+  if (rowIndex == CACHE.length) {
+    for (let specialRowIndex = SHEET_INFO_COLUMN_HEADER_ROW; specialRowIndex <= SHEET_INFO_ROWS; specialRowIndex++)
+    {
+      if (getValueFromCache(specialRowIndex, TEAM_NAME_COLUMN) == "") {
+        rowIndex = specialRowIndex - 1;
+        appendNeeded = false;
+        break;
+      }
+    }
+  }
+  
+  if (appendNeeded) {
+    sheet.insertRowAfter(rowIndex);
+    appendCacheRow();
+  }
+
   let range = sheet.getRange(rowIndex + 1, 1, 1, COLUMNS_TOTAL);
   range.setFontWeight('normal');
   range.setHorizontalAlignment('left');
   return range;
+}
+
+function ensureSheetInfoRows(sheet) {
+  for (let rowIndex = SHEET_INFO_COLUMN_HEADER_ROW; rowIndex < SHEET_INFO_ROWS; rowIndex++) {
+    sheet.insertRowAfter(SHEET_INFO_COLUMN_HEADER_ROW);
+    appendCacheRow();
+    let range = sheet.getRange(rowIndex + 1, 1, 1, COLUMNS_TOTAL);
+    range.setFontWeight('normal');
+    range.setHorizontalAlignment('left');
+  }
 }
